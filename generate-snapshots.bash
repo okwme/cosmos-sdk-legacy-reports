@@ -46,8 +46,8 @@ echo "$GENESIS_TIME"
 NODE_PID=0
 start_sync() {
   echo -n "Starting sync... "
-  sudo ufw allow to any port 26656
-  sudo ufw allow out to any port 26656
+  sudo ufw allow to any port 26656 > /dev/null 2>&1
+  sudo ufw allow out to any port 26656 > /dev/null 2>&1
   $NODE_BINARY start --home $DATA_DIR > $DATA_DIR/node.log 2>&1 &
   NODE_PID=$!
   sleep 1

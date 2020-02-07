@@ -226,7 +226,7 @@ class AccountProcessor:
         commission = self.__get_current_pending_commission()
         net = self.__get_net_transaction_flow(latest_report_time)
 
-        print(f"\tSnapshot!")
+        print(f"\tSnapshot! Bal: {balance}, Bond: {bond}, Pr: {pending}, Pc: {commission}, Tx: {net}")
         return {
             'balance': balance,
             'bond': bond,
@@ -236,9 +236,12 @@ class AccountProcessor:
         }
 
     def __get_current_balance(self):
-        response = urlopen(f"{LCD}/bank/balances/{self.address}").read()
-        data = json.loads(response.decode('utf-8')) or [{ 'amount': 0, 'denom': args.denom }]
-        relevant_balances = list(filter(lambda bal: bal['denom'] == args.denom, data))
+        try:
+            response = urlopen(f"{LCD}/bank/balances/{self.address}").read()
+            data = json.loads(response.decode('utf-8'))
+            relevant_balances = list(filter(lambda bal: bal['denom'] == args.denom, data))
+        except:
+            return 0
 
         try:
             amount = float(relevant_balances[0]['amount']) * (10 ** -args.scale)

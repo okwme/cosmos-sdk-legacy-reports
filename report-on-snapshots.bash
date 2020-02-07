@@ -75,7 +75,7 @@ if [[ -z $NETWORK_NAME || $NETWORK_NAME == "" ]]; then
   exit 1
 fi
 echo "Network: $NETWORK_NAME"
-rm "${NETWORK_NAME}.db"
+(rm "${NETWORK_NAME}.db" > /dev/null 2>&1 || exit 0)
 stop_node
 sleep 2
 
