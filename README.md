@@ -42,21 +42,22 @@ Now we can generate snapshots for every report period on this chain (variables b
 
 ```
 # Ctrl-X Ctrl-E, paste this code, edit & save to run
-export FINAL_BLOCK=2902000
-export DATA_DIR=~/hub2
-export NODE_BINARY=gaiad
+#export RESET_DATA=1
+export FINAL_BLOCK=500000
+export DATA_DIR=/cosmos-legacy-reports/hub1
+export NODE_BINARY=gaiad0_33_2
 export RPC_URL=localhost:26657
 export REPORT_FREQUENCY="1 days"
-screen -mS hub2-snapshots bash -c 'bash generate-snapshots.bash; exec bash'
+screen -mS hub1-snapshots bash -c 'bash generate-snapshots.bash; exec bash'
 ```
 
 This will take a long time, but once it completes run the reports like so:
 
 ```
 # Ctrl-X Ctrl-E, paste this code, edit & save to run
-export DATA_DIR=~/hub1
-export NODE_BINARY=gaiad
-export CLI_BINARY=cli
+export DATA_DIR=/cosmos-legacy-reports/hub1
+export NODE_BINARY=gaiad0_33_2
+export CLI_BINARY=gaiacli0_33_2
 export DENOM=uatom
 bash report-on-snapshots.bash
 ````

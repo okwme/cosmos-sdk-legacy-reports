@@ -1,7 +1,9 @@
 import json
 import sqlite3
 import datetime
+import traceback
 import bech32
+import logging
 
 from sys import exit
 from re import sub
@@ -20,6 +22,14 @@ class Db:
 
     def commit(self):
         self.__conn.commit()
+
+    def is_empty(self):
+        c = self.__conn.cursor()
+        c.execute('''
+            SELECT COUNT(1) FROM accounts
+        ''')
+        count = c.fetchone()[0]
+        return count == 0
 
     def get_accounts(self):
         c = self.__conn.cursor()
@@ -45,39 +55,6 @@ class Db:
             LIMIT 1
         ''', (address,))
         return r.fetchone()
-
-    def get_full_report(self, address):
-        c = self.__conn.cursor()
-        r = c.execute('''
-            SELECT * FROM snapshots
-            WHERE address = ?
-            ORDER BY timestamp ASC
-        ''', (address,))
-        rows = r.fetchall()
-
-        def add_income(i, row):
-            row = dict(row)
-            last_state = rows and (i-1 >= 0) and rows[i-1] or None
-
-            if not last_state:
-                income = None
-            else:
-                # to calculate income:
-                #   today's balance - yesterday's balance +
-                #   yesterday's bond - today's bond +
-                #   today's pending rewards - yesterday's pending rewards -
-                #   today's pending commission - yesterday's pending commission -
-                #   net transaction flow since last snapshot
-                income = row['balance'] - last_state['balance'] + \
-                         row['bond'] - last_state['bond'] + \
-                         row['pending_commission'] - last_state['pending_commission'] + \
-                         row['pending_rewards'] - last_state['pending_rewards'] - \
-                         row['net_tx']
-
-            row['income'] = income
-            return row
-
-        return [add_income(i, row) for (i, row) in enumerate(rows)]
 
     def insert_report(self, address, timestamp, values):
         self.__conn.execute('''
@@ -171,11 +148,11 @@ class AccountProcessor:
 
     def process_next(self, timestamp, prev_timestamp):
         if prev_timestamp is None:
-            return self.__get_genesis_state()
+            return self._get_genesis_state()
         else:
-            return self.__get_next_state(prev_timestamp), timestamp
+            return self._get_next_state(prev_timestamp), timestamp
 
-    def __get_genesis_state(self):
+    def _get_genesis_state(self):
         global genesis_cache
         if genesis_cache is None:
             response = urlopen(f"{RPC}/genesis").read()
@@ -185,30 +162,31 @@ class AccountProcessor:
         genesis_timestamp = datetime.datetime.strptime(genesis_time, "%Y-%m-%dT%H:%M:%SZ")
 
         try:
-            balance_at_genesis = int(filter(
+            balance_at_genesis = int(list(filter(
                 lambda account: account['address'] == self.address,
                 genesis_cache['app_state']['accounts']
-            )[0]['coins'][0]['amount']) * (10 ** -args.scale)
+            ))[0]['coins'][0]['amount']) * (10 ** -args.scale)
         except:
             balance_at_genesis = 0
 
-        try:
-            bonded_at_genesis = int(sum(map(lambda delegation: float(delegation['shares']), filter(
-                lambda delegation: delegation['delegator_address'] == self.address,
-                genesis_cache['app_state']['staking']['delegations']
-            )))) * (10 ** -args.scale)
-        except:
-            bonded_at_genesis = 0
+        bonded_at_genesis = int(sum(map(lambda delegation: float(delegation['shares']), filter(
+            lambda delegation: delegation['delegator_address'] == self.address,
+            genesis_cache['app_state']['staking']['delegations'] or []
+        )))) * (10 ** -args.scale)
 
-        try:
-            unbonding_at_genesis = int(sum(map(lambda delegation: sum(map(lambda entry: float(entry['balance']), delegation['entries'])), filter(
-                lambda delegation: delegation['delegator_address'] == self.address,
-                genesis_cache['app_state']['staking']['unbonding_delegations']
-            )))) * (10 ** -args.scale)
-        except:
-            unbonding_at_genesis = 0
+        # special case: add any self bond at genesis
+        for gentx in genesis_cache['app_state']['gentxs']:
+            for msg in gentx['value']['msg']:
+                if msg['type'] != 'cosmos-sdk/MsgCreateValidator': continue
+                if msg['value']['delegator_address'] == self.address and msg['value']['value']['denom'] == args.denom:
+                    bonded_at_genesis += int(msg['value']['value']['amount']) * (10 ** -args.scale)
 
-        print(f"\tGenesis baseline!")
+        unbonding_at_genesis = int(sum(map(lambda delegation: sum(map(lambda entry: float(entry['balance']), delegation['entries'])), filter(
+            lambda delegation: delegation['delegator_address'] == self.address,
+            genesis_cache['app_state']['staking']['unbonding_delegations'] or []
+        )))) * (10 ** -args.scale)
+
+        print(f"\tGenesis baseline! Bal: {balance_at_genesis}, Bond: {bonded_at_genesis + unbonding_at_genesis}")
         genesis_state = {
             'balance': balance_at_genesis,
             'bond': bonded_at_genesis + unbonding_at_genesis,
@@ -219,14 +197,14 @@ class AccountProcessor:
 
         return genesis_state, genesis_timestamp
 
-    def __get_next_state(self, latest_report_time):
-        balance = self.__get_current_balance()
-        bond = self.__get_total_bond_balance()
-        pending = self.__get_current_pending_rewards()
-        commission = self.__get_current_pending_commission()
-        net = self.__get_net_transaction_flow(latest_report_time)
+    def _get_next_state(self, latest_report_time):
+        balance = self._get_current_balance()
+        bond = self._get_total_bond_balance()
+        pending = self._get_current_pending_rewards()
+        commission = self._get_current_pending_commission()
+        net = self._get_net_transaction_flow(latest_report_time)
 
-        print(f"\tSnapshot! Bal: {balance}, Bond: {bond}, Pr: {pending}, Pc: {commission}, Tx: {net}")
+        print(f"\tBal: {balance}, Bond: {bond}, PRew: {pending}, PCom: {commission}, NetTx: {net}")
         return {
             'balance': balance,
             'bond': bond,
@@ -235,13 +213,19 @@ class AccountProcessor:
             'net_tx': net
         }
 
-    def __get_current_balance(self):
+    def _get_current_balance(self):
         try:
-            response = urlopen(f"{LCD}/bank/balances/{self.address}").read()
-            data = json.loads(response.decode('utf-8'))
+            response = urlopen(f"{LCD}/bank/balances/{self.address}").read().decode('utf-8')
+            if len(response) == 0: return 0
+            data = json.loads(response)
+            if data is None: return 0
             relevant_balances = list(filter(lambda bal: bal['denom'] == args.denom, data))
+            if len(relevant_balances) == 0: return 0
         except:
-            return 0
+            print(f"\n\nEXPLOSION. Could not get balance for {self.address}\nLCD Response: {response}\n\n")
+            traceback.print_exc()
+            exit(1)
+            # return 0
 
         try:
             amount = float(relevant_balances[0]['amount']) * (10 ** -args.scale)
@@ -251,7 +235,7 @@ class AccountProcessor:
 
         return round(amount, 3)
 
-    def __get_current_pending_commission(self):
+    def _get_current_pending_commission(self):
         operator = bech32.encode('cosmosvaloper', bech32.decode(self.address)[1])
         try:
             response = urlopen(f"{LCD}/distribution/validators/{operator}").read()
@@ -273,13 +257,16 @@ class AccountProcessor:
 
         return round(amount, 3)
 
-    def __get_current_pending_rewards(self):
+    def _get_current_pending_rewards(self):
         try:
             response = urlopen(f"{LCD}/distribution/delegators/{self.address}/rewards").read()
         except HTTPError as e:
-            body = e.read().decode('utf-8')
-            print(f"Explosion requesting rewards: {LCD}/distribution/delegators/{self.address}/rewards\n\n{body}\n\n\n\n")
-            exit(1)
+            # body = e.read().decode('utf-8')
+            # print(f"Explosion requesting rewards: {LCD}/distribution/delegators/{self.address}/rewards\n\n{body}\n\n\n\n")
+            # exit(1)
+            logger.error(f"Could not retrieve pending rewards for {self.address} at height {report_height}. Recorded `0`")
+            return 0
+
         data = json.loads(response.decode('utf-8')) or [{ 'amount': 0, 'denom': args.denom }]
         relevant_balances = list(filter(lambda bal: bal['denom'] == args.denom, data))
 
@@ -291,7 +278,7 @@ class AccountProcessor:
 
         return round(amount, 3)
 
-    def __get_net_transaction_flow(self, cuttoff):
+    def _get_net_transaction_flow(self, cuttoff):
         sends = urlopen(f"{LCD}/txs?action=send&sender={self.address}&limit=100").read()
         receives = urlopen(f"{LCD}/txs?action=send&recipient={self.address}&limit=100").read()
 
@@ -314,7 +301,7 @@ class AccountProcessor:
 
         return round(receives_amount - sends_amount, 3)
 
-    def __get_total_bond_balance(self):
+    def _get_total_bond_balance(self):
         bonded = urlopen(f"{LCD}/staking/delegators/{self.address}/delegations?limit=100").read()
         unbonding = urlopen(f"{LCD}/staking/delegators/{self.address}/unbonding_delegations?limit=100").read()
 
@@ -337,30 +324,49 @@ class AccountProcessor:
 
 # parse command line arguments
 parser = ArgumentParser(description="Report on an account's earnings")
-parser.add_argument('--db-path', required=True, help="the denomination of balances/shares/etc")
+parser.add_argument('--db-path', required=True, help="path to store sqlite3 database with reports")
+parser.add_argument('--log-path', default=join(dirname(__file__), 'error.log'), help="path to error log")
 parser.add_argument('--denom', nargs='?', default='uatom', help="the denomination of balances/shares/etc")
 parser.add_argument('--scale', nargs='?', default=6, type=int, help="scale factor to real world denom from chain denom")
 args = parser.parse_args()
+
 
 RPC = 'http://localhost:26657'
 LCD = 'http://localhost:1317'
 
 rpc_status = json.loads(urlopen(f"{RPC}/status").read())
+report_height = rpc_status['result']['sync_info']['latest_block_height']
 
-print(f"Running report at block {rpc_status['result']['sync_info']['latest_block_height']}...")
+print(f"Running report at block {report_height}...")
 
 
-db_path = join(dirname(__file__), args.db_path)
-db = Db(db_path)
+db = Db(args.db_path)
+
+
+logging.basicConfig(filename=args.log_path, format='%(message)s', filemode='a')
+logger = logging.getLogger()
+
 
 # check that we can access LCD
 lcd_status = urlopen(f"{LCD}/node_info").read()
 
 
+# ensure genesis accounts exist
+if db.is_empty():
+    print("Ensure genesis accounts... ")
+    response = urlopen(f"{RPC}/genesis").read()
+    genesis_cache = json.loads(response.decode('utf-8'))['result']['genesis']
+
+    for gentx in genesis_cache['app_state']['gentxs']:
+        for msg in gentx['value']['msg']:
+            if msg['type'] == 'cosmos-sdk/MsgCreateValidator':
+                db.add_account(msg['value']['delegator_address'])
+
+
 # get all delegation transactions and ensure we have accounts saved
 tx_hwm = 0
 page = 1
-print("Adding accounts... ", end='')
+print("Adding new delegator accounts... ")
 while True:
     txs_response = urlopen(f"{LCD}/txs?action=delegate&limit=100&page={page}").read()
     txs = json.loads(txs_response.decode('utf-8'))
@@ -384,7 +390,8 @@ while True:
 
 
 all_accounts = db.get_accounts()
-print(f"{len(all_accounts)}")
+print(f"Total accounts: {len(all_accounts)}")
+
 
 latest_block_time = datetime.datetime.strptime(
     sub('\.\d+Z$', "Z", rpc_status['result']['sync_info']['latest_block_time']),
@@ -392,9 +399,11 @@ latest_block_time = datetime.datetime.strptime(
 )
 
 for address in all_accounts:
+    print(f"Generating report for {address} at {latest_block_time}...")
+
     latest_report_time = dict(db.get_latest_report(address) or {}).get('timestamp', None)
     ap = AccountProcessor(address)
-    print(f"Generating report for {address} at {latest_block_time}...")
+
     report, timestamp = ap.process_next(latest_block_time, latest_report_time)
     db.insert_report(address, timestamp, report)
 
@@ -404,3 +413,5 @@ for address in all_accounts:
         db.insert_report(address, timestamp, report)
 
     db.commit()
+
+print("DONE")

@@ -3,6 +3,8 @@
 set -e
 trap cleanup EXIT
 
+WORKING_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
 DENOM=${DENOM:-uatom}
 
 # the binaries to use
@@ -33,7 +35,7 @@ NODE_PID=0
 LCD_PID=0
 start_node() {
   home=${1:-/$ZFS_POOL/tmp}
-  echo -n "Starting node in $home... "
+  echo -n "Starting node... "
   $NODE_BINARY start --home "$home" > $home/node.log 2>&1 &
   NODE_PID=$!
   sleep 1
@@ -55,6 +57,7 @@ stop_lcd() {
 }
 
 clone_snapshot() {
+  echo "Switching to snapshot: $snapshot"
   sudo zfs clone $1 $ZFS_POOL/tmp
 }
 discard_clone() {
@@ -75,27 +78,38 @@ if [[ -z $NETWORK_NAME || $NETWORK_NAME == "" ]]; then
   exit 1
 fi
 echo "Network: $NETWORK_NAME"
-(rm "${NETWORK_NAME}.db" > /dev/null 2>&1 || exit 0)
 stop_node
+echo "Database: $WORKING_DIR/${NETWORK_NAME}.db"
+echo "Log: $WORKING_DIR/${NETWORK_NAME}-reports.log"
+
 sleep 2
 
+(rm "$WORKING_DIR/${NETWORK_NAME}.db" > /dev/null 2>&1 || exit 0)
+
 zfs list -Hp -t snapshot -o name | grep $ZFS_FS | while read snapshot; do
-  echo "Switching to snapshot: $snapshot"
+  echo
   clone_snapshot "$snapshot"
-  sleep 5
+  sleep 3
 
   start_node
   start_lcd
   sleep 2
 
-  echo "Running report..."
-  $PYTHON_BINARY -u run_report.py --denom $DENOM --db-path=${network_name}.db
-  echo "DONE"
+  $PYTHON_BINARY -u $WORKING_DIR/calculate_earnings.py \
+    --denom $DENOM \
+    --db-path $WORKING_DIR/${NETWORK_NAME}.db \
+    --log-path $WORKING_DIR/${NETWORK_NAME}-reports.log
 
   stop_lcd
   stop_node
   sleep 2
 
   discard_clone
-  sleep 10
+  sleep 3
 done
+
+
+$PYTHON_BINARY -u $WORKING_DIR/output_csvs.py \
+  --denom $DENOM \
+  --db-path $WORKING_DIR/${NETWORK_NAME}.db \
+  --output-dir $WORKING_DIR/csvs
