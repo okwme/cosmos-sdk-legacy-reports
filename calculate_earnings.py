@@ -56,13 +56,14 @@ class Db:
         ''', (address,))
         return r.fetchone()
 
-    def insert_report(self, address, timestamp, values):
+    def insert_report(self, address, timestamp, height, values):
         self.__conn.execute('''
-            INSERT INTO snapshots(timestamp, address, balance, bond,
+            INSERT INTO snapshots(timestamp, height, address, balance, bond,
                                   pending_rewards, pending_commission, net_tx)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             timestamp,
+            height,
             address,
             values['balance'],
             values['bond'],
@@ -77,6 +78,7 @@ class Db:
                 CREATE TABLE IF NOT EXISTS snapshots (
                     id INTEGER PRIMARY KEY,
                     timestamp TIMESTAMP,
+                    height TEXT,
                     address TEXT,
                     balance REAL,
                     bond REAL,
@@ -146,11 +148,11 @@ class AccountProcessor:
     def __init__(self, address):
         self.address = address
 
-    def process_next(self, timestamp, prev_timestamp):
+    def process_next(self, height, timestamp, prev_timestamp):
         if prev_timestamp is None:
             return self._get_genesis_state()
         else:
-            return self._get_next_state(prev_timestamp), timestamp
+            return self._get_next_state(prev_timestamp), timestamp, height
 
     def _get_genesis_state(self):
         global genesis_cache
@@ -179,7 +181,12 @@ class AccountProcessor:
             for msg in gentx['value']['msg']:
                 if msg['type'] != 'cosmos-sdk/MsgCreateValidator': continue
                 if msg['value']['delegator_address'] == self.address and msg['value']['value']['denom'] == args.denom:
-                    bonded_at_genesis += int(msg['value']['value']['amount']) * (10 ** -args.scale)
+                    # the bond amount is also included in the genesis balance
+                    # so in the case of creating validators only, we need to substract
+                    # the bonded amount from balance ¯\_(ツ)_/¯
+                    amount = int(msg['value']['value']['amount']) * (10 ** -args.scale)
+                    bonded_at_genesis += amount
+                    balance_at_genesis -= amount
 
         unbonding_at_genesis = int(sum(map(lambda delegation: sum(map(lambda entry: float(entry['balance']), delegation['entries'])), filter(
             lambda delegation: delegation['delegator_address'] == self.address,
@@ -195,7 +202,7 @@ class AccountProcessor:
             'net_tx': 0
         }
 
-        return genesis_state, genesis_timestamp
+        return genesis_state, genesis_timestamp, 0
 
     def _get_next_state(self, latest_report_time):
         balance = self._get_current_balance()
@@ -404,13 +411,13 @@ for address in all_accounts:
     latest_report_time = dict(db.get_latest_report(address) or {}).get('timestamp', None)
     ap = AccountProcessor(address)
 
-    report, timestamp = ap.process_next(latest_block_time, latest_report_time)
-    db.insert_report(address, timestamp, report)
+    report, timestamp, height = ap.process_next(report_height, latest_block_time, latest_report_time)
+    db.insert_report(address, timestamp, height, report)
 
     # run again if we just did genesis
     if latest_report_time is None:
-        report, timestamp = ap.process_next(latest_block_time, timestamp)
-        db.insert_report(address, timestamp, report)
+        report, timestamp, height = ap.process_next(report_height, latest_block_time, timestamp)
+        db.insert_report(address, timestamp, height, report)
 
     db.commit()
 

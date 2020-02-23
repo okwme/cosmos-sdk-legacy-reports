@@ -7,6 +7,8 @@ from sys import exit
 from argparse import ArgumentParser
 from os.path import dirname, join
 from os import mkdir
+from re import sub
+from collections import OrderedDict
 
 
 class Db:
@@ -69,22 +71,22 @@ print(f"Generating CSV outputs in {args.output_dir}...")
 
 db = Db(args.db_path)
 
-
-for address in db.get_accounts():
-    print(f"\t#{address} ", end='')
+accounts = db.get_accounts()
+for address in accounts:
+    print(f"\t{address} ", end='')
 
     lines = db.get_full_report(address)
-    print(f"({len(lines)} lines) ")
+    print(f"({len(lines)} lines) ", end='')
 
     with open(join(args.output_dir, f"{address}.csv"), 'w', newline='') as csvfile:
         fields = [
-            'timestamp', 'balance', 'bond',
-            'pending_rewards', 'pending_commission', 'net_tx',
-            'income'
+            'timestamp', 'height', 'balance', 'bond',
+            'pending_rewards', 'pending_commission', 'net_tx', 'income'
         ]
-        writer = csv.DictWriter(csvfile, fieldnames=fields, quoting=csv.QUOTE_ALL)
-
-        for line in lines:
-            writer.writerow(line)
+        writer = csv.DictWriter(csvfile, fieldnames=fields, extrasaction='ignore', quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(OrderedDict([(field, sub('_', ' ', field).title()) for field in fields]))
+        writer.writerows(lines)
 
     print("DONE")
+
+print(f"Generated {len(accounts)} CSV reports.")

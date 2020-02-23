@@ -108,7 +108,7 @@ zfs list -Hp -t snapshot -o name | grep $ZFS_FS | while read snapshot; do
   sleep 3
 done
 
-
+echo
 $PYTHON_BINARY -u $WORKING_DIR/output_csvs.py \
   --denom $DENOM \
   --db-path $WORKING_DIR/${NETWORK_NAME}.db \
