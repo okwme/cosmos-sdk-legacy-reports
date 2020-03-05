@@ -103,6 +103,10 @@ class Transaction:
             return 0
 
         def reducer(acc, msg):
+            # other message types can be ignored
+            if msg['type'] != 'cosmos-sdk/MsgSend':
+                return acc
+
             value = msg['value']
             amount = reduce(
                 lambda acc, amount: acc + float(amount['amount']),
@@ -118,10 +122,10 @@ class Transaction:
         if not self.__data['logs'][0]['success']:
             return 0
 
-        relevant_fee_amounts = filter(
+        relevant_fee_amounts = list(filter(
             lambda amount: amount['denom'] == args.denom,
             self.__data['tx']['value']['fee']['amount'] or []
-        )
+        ))
 
         if len(relevant_fee_amounts) > 0:
             return float(relevant_fee_amounts[0]['amount']) * (10 ** -args.scale)
@@ -143,7 +147,6 @@ class Delegation:
         return float(amount) * (10 ** -args.scale)
 
 
-genesis_cache = None
 class AccountProcessor:
     def __init__(self, address):
         self.address = address
@@ -177,7 +180,7 @@ class AccountProcessor:
         )))) * (10 ** -args.scale)
 
         # special case: add any self bond at genesis
-        for gentx in genesis_cache['app_state']['gentxs']:
+        for gentx in (genesis_cache['app_state']['gentxs'] or []):
             for msg in gentx['value']['msg']:
                 if msg['type'] != 'cosmos-sdk/MsgCreateValidator': continue
                 if msg['value']['delegator_address'] == self.address and msg['value']['value']['denom'] == args.denom:
@@ -285,7 +288,7 @@ class AccountProcessor:
 
         return round(amount, 3)
 
-    def _get_net_transaction_flow(self, cuttoff):
+    def _get_net_transaction_flow(self, cutoff):
         sends = urlopen(f"{LCD}/txs?action=send&sender={self.address}&limit=100").read()
         receives = urlopen(f"{LCD}/txs?action=send&recipient={self.address}&limit=100").read()
 
@@ -358,13 +361,17 @@ logger = logging.getLogger()
 lcd_status = urlopen(f"{LCD}/node_info").read()
 
 
+# dont want to request genesis more than once
+genesis_cache = None
+
+
 # ensure genesis accounts exist
 if db.is_empty():
     print("Ensure genesis accounts... ")
     response = urlopen(f"{RPC}/genesis").read()
     genesis_cache = json.loads(response.decode('utf-8'))['result']['genesis']
 
-    for gentx in genesis_cache['app_state']['gentxs']:
+    for gentx in (genesis_cache['app_state']['gentxs'] or []):
         for msg in gentx['value']['msg']:
             if msg['type'] == 'cosmos-sdk/MsgCreateValidator':
                 db.add_account(msg['value']['delegator_address'])

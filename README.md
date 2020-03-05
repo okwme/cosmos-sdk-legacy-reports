@@ -54,7 +54,7 @@ export REPORT_FREQUENCY="1 days"
 screen -mS hub1-snapshots bash -c 'bash generate-snapshots.bash; exec bash'
 ```
 
-This will take a long time, but once it completes run the reports like so (again only required environment variable is `DATA_DIR`, the others are the defaults):
+This will take a very long time, but once it completes you can run the reports like so (again only required environment variable is `DATA_DIR`, the others are the defaults):
 
 ```
 # Ctrl-X Ctrl-E, paste this code, edit & save to run
