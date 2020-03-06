@@ -58,10 +58,10 @@ stop_lcd() {
 
 clone_snapshot() {
   echo "Switching to snapshot: $snapshot"
-  sudo zfs clone $1 $ZFS_POOL/tmp
+  sudo zfs clone "$1" "$ZFS_POOL/tmp"
 }
 discard_clone() {
-  sudo zfs destroy $ZFS_POOL/tmp
+  sudo zfs destroy "$ZFS_POOL/tmp"
 }
 
 cleanup() {
@@ -84,10 +84,26 @@ echo "Log: $WORKING_DIR/${NETWORK_NAME}-reports.log"
 
 sleep 2
 
-(rm "$WORKING_DIR/${NETWORK_NAME}.db" > /dev/null 2>&1 || exit 0)
+if [ ! -z $RESET_DATA ]; then
+  echo "Resetting database..."
+  (rm "$WORKING_DIR/${NETWORK_NAME}.db" > /dev/null 2>&1 || exit 0)
+fi
+
+echo
 
 zfs list -Hp -t snapshot -o name | grep $ZFS_FS | while read snapshot; do
-  echo
+  # determine if we need to skip this snapshot because we already
+  # have data for it
+  latest_report=$(sqlite3 "$WORKING_DIR/${NETWORK_NAME}.db" "SELECT timestamp FROM snapshots ORDER BY timestamp DESC LIMIT 1;")
+  latest_date=$(date -d "$latest_report" +%Y-%m-%d)
+  IFS='@'
+  read -ra snapshot_date <<< "$snapshot"
+  snapshot_date=${snapshot_date[1]}
+  if ! [[ "$snapshot_date" > "$latest_date" ]]; then
+    echo "Skipping $snapshot_date"
+    continue
+  fi
+
   clone_snapshot "$snapshot"
   sleep 3
 
@@ -106,9 +122,9 @@ zfs list -Hp -t snapshot -o name | grep $ZFS_FS | while read snapshot; do
 
   discard_clone
   sleep 3
+  echo
 done
 
-echo
 $PYTHON_BINARY -u $WORKING_DIR/output_csvs.py \
   --denom $DENOM \
   --db-path $WORKING_DIR/${NETWORK_NAME}.db \
