@@ -109,7 +109,7 @@ zfs list -Hp -t snapshot -o name | grep $ZFS_FS | while read snapshot; do
 
   start_node
   start_lcd
-  sleep 2
+  sleep 5
 
   $PYTHON_BINARY -u $WORKING_DIR/calculate_earnings.py \
     --denom $DENOM \

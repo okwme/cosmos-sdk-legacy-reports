@@ -11,6 +11,7 @@ from argparse import ArgumentParser
 from functools import reduce
 from urllib.request import urlopen
 from urllib.error import HTTPError
+from http.client import RemoteDisconnected
 from os.path import dirname, join
 
 
@@ -289,8 +290,12 @@ class AccountProcessor:
         return round(amount, 3)
 
     def _get_net_transaction_flow(self, cutoff):
-        sends = urlopen(f"{LCD}/txs?action=send&sender={self.address}&limit=100").read()
-        receives = urlopen(f"{LCD}/txs?action=send&recipient={self.address}&limit=100").read()
+        try:
+            sends = urlopen(f"{LCD}/txs?action=send&sender={self.address}&limit=100").read()
+            receives = urlopen(f"{LCD}/txs?action=send&recipient={self.address}&limit=100").read()
+        except (HTTPError, RemoteDisconnected) as e:
+            logger.error(f"Could not retrieve net transaction flow for {self.address} at height {report_height}. Recorded `0`")
+            return 0
 
         sends_data = json.loads(sends.decode('utf-8')) or []
         receives_data = json.loads(receives.decode('utf-8')) or []
