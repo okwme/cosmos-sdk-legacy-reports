@@ -1,10 +1,10 @@
 import json
-import sqlite3
 import datetime
 import traceback
 import bech32
 import logging
 
+from sqlite3 import connect, Row, PARSE_DECLTYPES, PARSE_COLNAMES
 from sys import exit
 from re import sub
 from argparse import ArgumentParser
@@ -17,8 +17,8 @@ from os.path import dirname, join
 
 class Db:
     def __init__(self, path):
-        self.__conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
-        self.__conn.row_factory = sqlite3.Row
+        self.__conn = connect(path, detect_types=PARSE_DECLTYPES|PARSE_COLNAMES)
+        self.__conn.row_factory = Row
         self.__init_schema()
 
     def commit(self):
@@ -351,6 +351,7 @@ LCD = 'http://localhost:1317'
 
 rpc_status = json.loads(urlopen(f"{RPC}/status").read())
 report_height = rpc_status['result']['sync_info']['latest_block_height']
+chain = rpc_status['result']['network']
 
 print(f"Running report at block {report_height}...")
 
@@ -383,8 +384,21 @@ if db.is_empty():
 
 
 # get all delegation transactions and ensure we have accounts saved
+
+# on hub1/hub2 there is no indication of the number of pages, so
+# we have to just keep getting pages until the highest height in
+# a page is the highest height we already have
 tx_hwm = 0
-page = 1
+
+# if we try to get all delegation transactions each day, the
+# process will quickly reach 500+ pages of requests for every report day
+# so store the highest page we've retrieved and start there (less one to be safe)
+# on the next run through
+try:
+    page = int(open(f".detect-delegators-page-num-{chain}",'r').read()) - 1
+except:
+    page = 1
+
 print("Adding new delegator accounts... ")
 while True:
     txs_response = urlopen(f"{LCD}/txs?action=delegate&limit=100&page={page}").read()
@@ -406,6 +420,7 @@ while True:
                 pass
 
     page += 1
+    open(f".detect-delegators-page-num-{chain}", 'w').write(str(page))
 
 
 all_accounts = db.get_accounts()
