@@ -8,7 +8,7 @@ This repository contains scripts used to generate back-filled income reports for
 - Ubuntu 18.04 (tested)
 - Python 3.6+
 - Bash 4+
-- ZFS
+- ZFS (`apt install zfsutils-linux`)
 - UFW enabled
 - jq 1.5+
 - sqlite3 (`apt install sqlite3 libsqlite3-dev`)

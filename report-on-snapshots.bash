@@ -36,7 +36,7 @@ LCD_PID=0
 start_node() {
   home=${1:-/$ZFS_POOL/tmp}
   echo -n "Starting node... "
-  $NODE_BINARY start --home "$home" > $home/node.log 2>&1 &
+  $NODE_BINARY start --home "$home" > ~/node.log 2>&1 &
   NODE_PID=$!
   sleep 1
   echo "OK (pid: $NODE_PID)"
@@ -44,7 +44,7 @@ start_node() {
 start_lcd() {
   home=${1:-/$ZFS_POOL/tmp}
   echo -n "Starting LCD... "
-  $CLI_BINARY rest-server --laddr tcp://0.0.0.0:1317 --home "$home" --trust-node=true > $home/lcd.log 2>&1 &
+  $CLI_BINARY rest-server --laddr tcp://0.0.0.0:1317 --home "$home" --trust-node=true > ~/lcd.log 2>&1 &
   LCD_PID=$!
   sleep 1
   echo "OK (pid: $LCD_PID)"
