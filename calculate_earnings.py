@@ -233,10 +233,8 @@ class AccountProcessor:
             relevant_balances = list(filter(lambda bal: bal['denom'] == args.denom, data))
             if len(relevant_balances) == 0: return 0
         except:
-            print(f"\n\nEXPLOSION. Could not get balance for {self.address}\nLCD Response: {response}\n\n")
-            traceback.print_exc()
-            exit(1)
-            # return 0
+            logger.error(f"Could not retrieve balance for {self.address} at height {report_height}. Recorded `0`")
+            return 0
 
         try:
             amount = float(relevant_balances[0]['amount']) * (10 ** -args.scale)
@@ -351,7 +349,7 @@ LCD = 'http://localhost:1317'
 
 rpc_status = json.loads(urlopen(f"{RPC}/status").read())
 report_height = rpc_status['result']['sync_info']['latest_block_height']
-chain = rpc_status['result']['network']
+chain = rpc_status['result']['node_info']['network']
 
 print(f"Running report at block {report_height}...")
 

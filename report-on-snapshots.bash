@@ -59,6 +59,7 @@ stop_lcd() {
 clone_snapshot() {
   echo "Switching to snapshot: $snapshot"
   sudo zfs clone "$1" "$ZFS_POOL/tmp"
+  sudo chown -R $USER:$USER "/$ZFS_POOL/tmp"
 }
 discard_clone() {
   sudo zfs destroy "$ZFS_POOL/tmp"
