@@ -21,7 +21,7 @@ This repository contains scripts used to generate back-filled income reports for
 Make a ZFS pool, and a filesystem to contain your chosen chain:
 
 ```
-sudo zpool create -f cosmoslike-legacy-reports /dev/sda
+sudo zpool create -f cosmos-legacy-reports /dev/sda
 sudo zfs create cosmos-legacy-reports/hub2
 sudo chown -R $USER /cosmos-legacy-reports/hub2
 ```
