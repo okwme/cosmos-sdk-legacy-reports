@@ -10,7 +10,7 @@ This repository contains scripts used to generate back-filled income reports for
 - Bash 4+
 - ZFS (`apt install zfsutils-linux`)
 - UFW enabled
-- jq 1.5+
+- jq 1.5+ (`apt install jq`)
 - sqlite3 (`apt install sqlite3 libsqlite3-dev`)
 - `gaiad`/`gaiacli` built to appropriate version (Hub 1: `0.33.2`, Hub 2: `0.34.9`)
 - password-less `sudo` for running user
