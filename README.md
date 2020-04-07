@@ -22,14 +22,14 @@ Make a ZFS pool, and a filesystem to contain your chosen chain:
 
 ```
 sudo zpool create -f cosmos-legacy-reports /dev/sda
-sudo zfs create cosmos-legacy-reports/hub2
-sudo chown -R $USER /cosmos-legacy-reports/hub2
+sudo zfs create cosmos-legacy-reports/hub1
+sudo chown -R $USER /cosmos-legacy-reports/hub1
 ```
 
 Setup gaiad/equivalent, for example:
 
 ```
-gaiad0_34_9 init hub2reportstmp --home /cosmos-legacy-reports/hub2
+gaiad0_34_9 init hub1reportstmp --home /cosmos-legacy-reports/hub1
 ```
 
 Update configs:
